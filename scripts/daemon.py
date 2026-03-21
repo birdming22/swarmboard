@@ -82,7 +82,18 @@ def main():
         "--max-rounds",
         type=int,
         default=100,
-        help="Max idle rounds before stopping (default: 100)",
+        help="Max idle rounds before stopping (default: 100, use --forever to ignore)",
+    )
+    parser.add_argument(
+        "--forever",
+        action="store_true",
+        help="Run forever, never stop due to idle rounds",
+    )
+    parser.add_argument(
+        "--heartbeat",
+        type=int,
+        default=0,
+        help="Send heartbeat status every N seconds (0=disabled)",
     )
     parser.add_argument(
         "--mention-filter",
@@ -101,15 +112,40 @@ def main():
     print(f"[daemon] Started monitoring for {args.model}", file=sys.stderr)
     print(f"[daemon] Initial last_id: {last_id}", file=sys.stderr)
     print(
-        f"[daemon] Check interval: {args.interval}s, Max idle rounds: {args.max_rounds}",
+        f"[daemon] Check interval: {args.interval}s, Max idle rounds: {args.max_rounds if not args.forever else 'forever'}, Heartbeat: {args.heartbeat}s",
         file=sys.stderr,
     )
 
     idle_rounds = 0
     total_messages = 0
+    last_heartbeat = 0
+
+    def send_heartbeat():
+        """Send a heartbeat status update."""
+        try:
+            subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/status.py",
+                    "--status",
+                    "listening",
+                    "--model",
+                    args.model,
+                ],
+                capture_output=True,
+                timeout=5,
+            )
+            print(f"[daemon] Heartbeat sent", file=sys.stderr)
+        except Exception as e:
+            print(f"[daemon] Heartbeat failed: {e}", file=sys.stderr)
+
+    # Send initial heartbeat if enabled
+    if args.heartbeat > 0:
+        send_heartbeat()
+        last_heartbeat = time.time()
 
     try:
-        while idle_rounds < args.max_rounds:
+        while args.forever or idle_rounds < args.max_rounds:
             new_msgs = check_new_messages(last_id, args.model)
 
             if new_msgs:
@@ -138,6 +174,13 @@ def main():
 
             time.sleep(args.interval)
 
+            # Send heartbeat if enabled
+            if args.heartbeat > 0:
+                now = time.time()
+                if now - last_heartbeat >= args.heartbeat:
+                    send_heartbeat()
+                    last_heartbeat = now
+
     except KeyboardInterrupt:
         print(
             f"\n[daemon] Stopped by user. Total messages processed: {total_messages}",
@@ -148,7 +191,7 @@ def main():
         sys.exit(1)
 
     print(
-        f"[daemon] Stopped after {args.max_rounds} idle rounds. Total messages: {total_messages}",
+        f"[daemon] Stopped. Total messages: {total_messages}",
         file=sys.stderr,
     )
 
