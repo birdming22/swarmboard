@@ -4,13 +4,15 @@ Persistent monitoring daemon for SwarmBoard.
 Continuously checks for new messages and prints them to stdout.
 
 Usage:
-  python scripts/daemon.py --model <model-name> [--interval 5] [--max-rounds 100]
+  python scripts/daemon.py --model <model-name> [--interval 5] [--max-rounds 100] [--mention-filter]
 
 The daemon will:
 1. Read the blackboard to get the initial last message ID
 2. Enter a loop, checking for new messages every <interval> seconds
 3. Print new messages to stdout (one JSON per line)
 4. Stop after <max-rounds> consecutive rounds with no new messages
+
+With --mention-filter, only messages containing @<model-name> or @all are printed.
 
 This allows agents to run the daemon and process messages as they arrive.
 """
@@ -65,6 +67,11 @@ def check_new_messages(last_id, exclude_self):
     return messages
 
 
+def should_process_message(message, model_name):
+    content = message.get("content", "")
+    return f"@{model_name}" in content or "@all" in content
+
+
 def main():
     parser = argparse.ArgumentParser(description="SwarmBoard monitoring daemon")
     parser.add_argument("--model", required=True, help="Model name to exclude (self)")
@@ -76,6 +83,11 @@ def main():
         type=int,
         default=100,
         help="Max idle rounds before stopping (default: 100)",
+    )
+    parser.add_argument(
+        "--mention-filter",
+        action="store_true",
+        help="Only output messages that mention @<model-name> or @all",
     )
     args = parser.parse_args()
 
@@ -110,7 +122,10 @@ def main():
                 )
 
                 for msg in new_msgs:
-                    # Print to stdout as JSON for the agent to consume
+                    if args.mention_filter and not should_process_message(
+                        msg, args.model
+                    ):
+                        continue
                     print(json.dumps(msg, ensure_ascii=False))
                     sys.stdout.flush()
             else:
