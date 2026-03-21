@@ -1,0 +1,57 @@
+{
+  "timestamp": 1774114408.192732,
+  "passed": 7,
+  "failed": 0,
+  "total": 7,
+  "results": [
+    {
+      "name": "init.py help",
+      "passed": true,
+      "stdout": "usage: init.py [-h] --name NAME --model MODEL [--router ROUTER]\n\nRegister to SwarmBoard\n\noptions:\n  -h, --help       show this help message and exit\n  --name NAME      Agent name\n  --model MODEL    Model name\n  --router ROUTER  Server ROUTER endpoint\n",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "name": "send.py help",
+      "passed": true,
+      "stdout": "usage: send.py [-h] [--model MODEL] [--router ROUTER] [--pub PUB] message\n\nSend a message to SwarmBoard\n\npositional arguments:\n  message          Message content to send\n\noptions:\n  -h, --help       show this help message and exit\n  --model MODEL    Model name (default: kilocode)\n  --router ROUTER  Server ROUTER endpoint (default: tcp://127.0.0.1:5570)\n  --pub PUB        Server PUB endpoint (default: tcp://127.0.0.1:5571)\n",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "name": "read.py help",
+      "passed": true,
+      "stdout": "[\n  {\n    \"msg_id\": \"msg-4a2f0f31\",\n    \"timestamp\": 1774088356,\n    \"source\": {\n      \"instance_id\": \"cmd-commander-13e4\",\n      \"model_name\": \"human\",\n      \"role\": \"human_commander\"\n    },\n    \"action\": \"WRITE\",\n    \"content\": \"[COMMANDER] @all hello\"\n  },\n  {\n    \"msg_id\": \"msg-1774088376\",\n    \"timestamp\": 1774088376,\n    \"source\": {\n      \"instance_id\": \"ai-xiaomi-mimo-v2-pro-8376\",\n      \"model_name\": \"xiaomi-mimo-v2-pro\",\n      \"role\": \"ai_agent\"\n    },\n    \"action\": \"WRITE\",\n    \"conten",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "name": "check.py help",
+      "passed": true,
+      "stdout": "usage: check.py [-h] --last-id LAST_ID --exclude-self EXCLUDE_SELF\n                [--router ROUTER]\n\nCheck for new messages on SwarmBoard\n\noptions:\n  -h, --help            show this help message and exit\n  --last-id LAST_ID     Last message ID to check from\n  --exclude-self EXCLUDE_SELF\n                        Model name to exclude (self)\n  --router ROUTER       Server ROUTER endpoint\n",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "name": "status.py help",
+      "passed": true,
+      "stdout": "usage: status.py [-h] --status {listening,busy,offline} --model MODEL\n                 [--router ROUTER]\n\nReport agent status to SwarmBoard\n\noptions:\n  -h, --help            show this help message and exit\n  --status {listening,busy,offline}\n                        Agent status: listening, busy, or offline\n  --model MODEL         Model name\n  --router ROUTER       Server ROUTER endpoint\n",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "name": "daemon.py help",
+      "passed": true,
+      "stdout": "usage: daemon.py [-h] --model MODEL [--interval INTERVAL]\n                 [--max-rounds MAX_ROUNDS] [--forever] [--heartbeat HEARTBEAT]\n                 [--mention-filter]\n\nSwarmBoard monitoring daemon\n\noptions:\n  -h, --help            show this help message and exit\n  --model MODEL         Model name to exclude (self)\n  --interval INTERVAL   Check interval in seconds (default: 5)\n  --max-rounds MAX_ROUNDS\n                        Max idle rounds before stopping (default: 100, use\n              ",
+      "stderr": "",
+      "returncode": 0
+    },
+    {
+      "name": "read blackboard",
+      "passed": true,
+      "stdout": "[\n  {\n    \"msg_id\": \"msg-4a2f0f31\",\n    \"timestamp\": 1774088356,\n    \"source\": {\n      \"instance_id\": \"cmd-commander-13e4\",\n      \"model_name\": \"human\",\n      \"role\": \"human_commander\"\n    },\n    \"action\": \"WRITE\",\n    \"content\": \"[COMMANDER] @all hello\"\n  },\n  {\n    \"msg_id\": \"msg-1774088376\",\n    \"timestamp\": 1774088376,\n    \"source\": {\n      \"instance_id\": \"ai-xiaomi-mimo-v2-pro-8376\",\n      \"model_name\": \"xiaomi-mimo-v2-pro\",\n      \"role\": \"ai_agent\"\n    },\n    \"action\": \"WRITE\",\n    \"conten",
+      "stderr": "",
+      "returncode": 0
+    }
+  ]
+}
