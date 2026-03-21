@@ -5,6 +5,8 @@ description = "SwarmBoard — ZMQ multi-instance blackboard for multi-AI CLI col
 requires-python = ">=3.10"
 dependencies = [
     "pyzmq>=26.0",
+    "mcp>=1.0.0",
+    "loguru>=0.7.0",
 ]
 
 [project.scripts]

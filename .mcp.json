@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "swarmboard": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "swarmboard.mcp"],
+      "cwd": "/home/k200/workspace/swarmboard"
+    }
+  }
+}

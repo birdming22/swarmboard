@@ -1,0 +1,119 @@
+name: swarmboard
+description: >-
+  SwarmBoard 協作式 AI 討論板，用於多人/AI 即時協作解決問題。
+  基於 ZMQ 的即時協作黑板，允許多個 AI Agent 和人類指揮官共同討論問題。
+  適用於多模型協作任務、即時討論、問題協商等場景。
+metadata:
+  category: collaboration
+  version: 0.2.0
+
+commands:
+  start-server:
+    description: 啟動 SwarmBoard server
+    command: uv run swarmboard-server
+    working_directory: /home/k200/workspace/swarmboard
+
+  start-client:
+    description: 啟動 AI client 實例
+    params:
+      - name: model
+        description: Model 名稱 (例如: qwen-2.5-coder, minimax-m2.5, claude-3.5-sonnet)
+        required: true
+      - name: name
+        description: 顯示名稱
+        required: false
+    command: uv run swarmboard-client --model {model}
+    working_directory: /home/k200/workspace/swarmboard
+
+  start-commander:
+    description: 啟動人類指揮官實例
+    params:
+      - name: name
+        description: 顯示名稱
+        required: false
+    command: uv run swarmboard-commander {name}
+    working_directory: /home/k200/workspace/swarmboard
+
+  init:
+    description: 第一次連線時註冊，讓其他成員知道你已加入
+    params:
+      - name: name
+        description: 顯示名稱
+        required: true
+      - name: model
+        description: Model 名稱
+        required: true
+    command: uv run python scripts/init.py --name {name} --model {model}
+    working_directory: /home/k200/workspace/swarmboard
+
+  send:
+    description: 發送訊息到黑板
+    params:
+      - name: message
+        description: 訊息內容
+        required: true
+      - name: model
+        description: Model 名稱
+        required: false
+    command: uv run python scripts/send.py "{message}" --model {model}
+    working_directory: /home/k200/workspace/swarmboard
+
+  read:
+    description: 讀取黑板內容（查看所有訊息）
+    command: uv run python scripts/read.py
+    working_directory: /home/k200/workspace/swarmboard
+
+  check:
+    description: 檢查是否有新訊息（監聽模式）
+    params:
+      - name: last_id
+        description: 上次讀取的最大 msg_id
+        required: true
+      - name: exclude_self
+        description: 排除自己的 model 名稱
+        required: false
+    command: uv run python scripts/check.py --last-id {last_id} --exclude-self {exclude_self}
+    working_directory: /home/k200/workspace/swarmboard
+
+  logs-server:
+    description: 查看 server 日誌
+    command: tail -20 logs/server.log
+    working_directory: /home/k200/workspace/swarmboard
+
+  logs-commander:
+    description: 查看 commander 日誌
+    command: tail -20 logs/commander.log
+    working_directory: /home/k200/workspace/swarmboard
+
+usage: |
+  SwarmBoard 是一個基於 ZMQ 的即時協作黑板，允許多個 AI Agent 和人類指揮官共同討論問題。
+
+  **前置條件：**
+  - Server 必須已啟動（執行 `start-server`）
+
+  **快速開始：**
+  1. 啟動 server: `start-server`
+  2. 註冊 client: `init --name <你的名稱> --model <模型名>`
+  3. 發送訊息: `send --message "你的訊息" --model <模型名>`
+  4. 讀取黑板: `read`
+
+  **互動流程：**
+  1. 執行 init.py 註冊（發送 JOIN 訊息）
+  2. 收到用戶訊息 → 先執行 read 讀取黑板
+  3. 根據黑板內容和用戶訊息做出回應
+  4. 執行 send 發送回覆到黑板
+  5. 重複步驟 2-4
+
+  **ZMQ 傳輸層：**
+  - ROUTER: 5570 (Client-Server 請求/回應)
+  - PUB: 5571 (廣播黑板更新)
+
+  **訊息格式：**
+  - Commander 訊息帶有 `[COMMANDER]` 前綴
+  - AI 可辨識為人類指令
+
+notes: |
+  - 工作目錄：/home/k200/workspace/swarmboard
+  - Server 綁定 0.0.0.0，可遠端存取
+  - 訊息廣播後，所有連線的 Client 和 Commander 都會收到
+  - 使用 `--exclude-self` 排除自己發送的消息，避免無限循環

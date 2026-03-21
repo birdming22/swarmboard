@@ -10,12 +10,26 @@ Usage:
 
 import argparse
 import json
+import select
 import signal
 import sys
 import time
 import uuid
+from pathlib import Path
 
 import zmq
+from loguru import logger
+
+LOG_FILE = Path("/home/k200/workspace/swarmboard/logs/commander.log")
+LOG_FILE.parent.mkdir(exist_ok=True)
+
+logger.add(
+    LOG_FILE,
+    rotation="10 MB",
+    retention="1 day",
+    level="DEBUG",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+)
 
 from swarmboard.protocol import (
     Action,
@@ -30,7 +44,7 @@ running = True
 
 def signal_handler(sig, frame):
     global running
-    print("\n[Commander] Shutting down...", flush=True)
+    logger.info("Shutting down...")
     running = False
 
 
@@ -71,14 +85,14 @@ def main():
     sub.setsockopt_string(zmq.SUBSCRIBE, "blackboard")
     sub.setsockopt(zmq.RCVTIMEO, 500)
 
-    print(f"[Commander] ID: {instance_id}", flush=True)
-    print(f"[Commander] ROUTER: {args.router}", flush=True)
-    print(f"[Commander] PUB:    {args.pub}", flush=True)
+    logger.info(f"ID: {instance_id}")
+    logger.info(f"ROUTER: {args.router}")
+    logger.info(f"PUB:    {args.pub}")
 
     # Sync
     read_req = make_msg(source, Action.READ_REQUEST)
     dealer.send_string(encode_msg(read_req))
-    print("[Commander] Syncing blackboard...", flush=True)
+    logger.info("Syncing blackboard...")
 
     synced = False
     sync_deadline = time.time() + 5.0
@@ -91,36 +105,47 @@ def main():
         msg = decode_msg(reply)
         if msg and msg.get("action") == Action.READ_RESPONSE.value:
             history = json.loads(msg.get("content", "[]"))
-            print(f"[Commander] Synced: {len(history)} entries", flush=True)
+            logger.info(f"Synced: {len(history)} entries")
             if history:
-                print("─── Blackboard History ───", flush=True)
+                logger.info("─── Blackboard History ───")
                 for i, entry in enumerate(history):
                     src = entry.get("source", {})
                     model = src.get("model_name", "?")
                     eid = src.get("instance_id", "?")
                     role = src.get("role", "?")
                     content = entry.get("content", "")
-                    print(f"  #{i + 1} [{eid} ({model}/{role})] {content}", flush=True)
-                print("─── End History ───", flush=True)
+                    logger.info(f"  #{i + 1} [{eid} ({model}/{role})] {content}")
+                logger.info("─── End History ───")
             synced = True
 
     if not synced:
-        print("[Commander] Sync timeout — proceeding", flush=True)
+        logger.warning("Sync timeout — proceeding")
 
     # Main loop
     poller = zmq.Poller()
     poller.register(dealer, zmq.POLLIN)
     poller.register(sub, zmq.POLLIN)
-    poller.register(sys.stdin, zmq.POLLIN)
 
-    print(
-        "[Commander] Type a message and press Enter to broadcast a command.", flush=True
-    )
-    print("[Commander] (Ctrl+C to quit)\n", flush=True)
+    logger.info("Type a message and press Enter to broadcast a command.")
+    logger.info("(Ctrl+C to quit)")
 
     while running:
+        # Check stdin separately using select
+        readable, _, _ = select.select([sys.stdin], [], [], 0.1)
+        if readable:
+            line = sys.stdin.readline()
+            if not line:
+                break
+            line = line.strip()
+            if line:
+                write_msg = make_msg(source, Action.WRITE, f"[COMMANDER] {line}")
+                dealer.send_string(encode_msg(write_msg))
+                logger.info(f">>> Sent: {line}")
+            continue
+
+        # Poll ZMQ sockets
         try:
-            socks = dict(poller.poll(timeout=500))
+            socks = dict(poller.poll(timeout=100))
         except zmq.ZMQError:
             if not running:
                 break
@@ -139,29 +164,17 @@ def main():
                 role = src.get("role", "?")
                 content = entry.get("content", "")
                 if eid != instance_id:
-                    print(f"  [{eid} ({model}/{role})] {content}", flush=True)
+                    logger.info(f"[BROADCAST] [{eid} ({model}/{role})] {content}")
 
         # DEALER reply
         if dealer in socks:
             reply = dealer.recv_string()
 
-        # Stdin — human command
-        if sys.stdin in socks:
-            line = sys.stdin.readline()
-            if not line:
-                break
-            line = line.strip()
-            if not line:
-                continue
-            write_msg = make_msg(source, Action.WRITE, f"[COMMANDER] {line}")
-            dealer.send_string(encode_msg(write_msg))
-            print(f"  >>> Sent: {line}", flush=True)
-
     # Cleanup
     dealer.close()
     sub.close()
     ctx.term()
-    print("[Commander] Shutdown complete.", flush=True)
+    logger.info("Shutdown complete.")
 
 
 if __name__ == "__main__":
