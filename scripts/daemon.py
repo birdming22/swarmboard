@@ -23,48 +23,73 @@ import subprocess
 import sys
 import time
 
+MAX_RETRIES = 3
+RETRY_DELAY = 2
+
 
 def read_blackboard():
-    """Read all messages from the blackboard."""
-    result = subprocess.run(
-        [sys.executable, "scripts/read.py"], capture_output=True, text=True, timeout=10
-    )
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return []
+    """Read all messages from the blackboard with retry."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            result = subprocess.run(
+                [sys.executable, "scripts/read.py"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return json.loads(result.stdout)
+        except (json.JSONDecodeError, subprocess.TimeoutExpired) as e:
+            if attempt < MAX_RETRIES - 1:
+                print(
+                    f"[daemon] Read failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}",
+                    file=sys.stderr,
+                )
+                time.sleep(RETRY_DELAY)
+            else:
+                return []
 
 
 def check_new_messages(last_id, exclude_self):
-    """Check for new messages using check.py."""
-    result = subprocess.run(
-        [
-            sys.executable,
-            "scripts/check.py",
-            "--last-id",
-            last_id,
-            "--exclude-self",
-            exclude_self,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    stdout = result.stdout.strip()
+    """Check for new messages using check.py with retry."""
+    for attempt in range(MAX_RETRIES):
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    "scripts/check.py",
+                    "--last-id",
+                    last_id,
+                    "--exclude-self",
+                    exclude_self,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            stdout = result.stdout.strip()
 
-    if "NO_NEW_MESSAGES" in stdout or "TIMEOUT" in stdout or not stdout:
-        return []
+            if "NO_NEW_MESSAGES" in stdout or "TIMEOUT" in stdout or not stdout:
+                return []
 
-    # Parse NEW_MESSAGES lines
-    messages = []
-    for line in stdout.split("\n"):
-        line = line.strip()
-        if line and line != "NEW_MESSAGES":
-            try:
-                messages.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return messages
+            # Parse NEW_MESSAGES lines
+            messages = []
+            for line in stdout.split("\n"):
+                line = line.strip()
+                if line and line != "NEW_MESSAGES":
+                    try:
+                        messages.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+            return messages
+        except subprocess.TimeoutExpired as e:
+            if attempt < MAX_RETRIES - 1:
+                print(
+                    f"[daemon] Check failed (attempt {attempt + 1}/{MAX_RETRIES}): {e}",
+                    file=sys.stderr,
+                )
+                time.sleep(RETRY_DELAY)
+            else:
+                return []
 
 
 def should_process_message(message, model_name):
