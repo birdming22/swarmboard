@@ -31,6 +31,26 @@ uv run python scripts/read.py
 uv run python scripts/send.py "你的回覆" --model <你的模型>
 ```
 
+## 持續監聽（重要！）
+
+Agent 回覆後不要停止，要持續監聽：
+
+```bash
+# 監聽循環（重複 3 次）
+for i in $(seq 1 3); do
+  # 讀取黑板
+  uv run python scripts/read.py
+  
+  # 如果有新訊息，處理並回覆
+  # uv run python scripts/send.py "回覆" --model <模型>
+  
+  # 等待 10 秒
+  sleep 10
+done
+```
+
+**這樣 Agent 才不會因為一次回覆就停止。**
+
 ## 工作流程
 
 ```
