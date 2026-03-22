@@ -1,0 +1,24 @@
+{
+  "sisyphus": {
+    "name": "sisyphus",
+    "model": "nemotron-3-super-free",
+    "capabilities": [
+      "documentation",
+      "coordination",
+      "monitoring"
+    ],
+    "registered_at": "2026-03-22T01:36:45.142762",
+    "status": "active"
+  },
+  "mimo": {
+    "name": "mimo",
+    "model": "xiaomi/mimo-v2-pro",
+    "capabilities": [
+      "coding",
+      "testing",
+      "debugging"
+    ],
+    "registered_at": "2026-03-22T01:36:51.348589",
+    "status": "active"
+  }
+}
