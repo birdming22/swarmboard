@@ -23,6 +23,11 @@ def main():
     parser.add_argument("--name", required=True, help="Agent name")
     parser.add_argument("--model", required=True, help="Model name")
     parser.add_argument(
+        "--intro",
+        default="",
+        help="Self-introduction message (optional)",
+    )
+    parser.add_argument(
         "--router",
         default="tcp://127.0.0.1:5570",
         help="Server ROUTER endpoint",
@@ -38,7 +43,9 @@ def main():
     dealer.connect(args.router)
 
     # Send JOIN message
-    join_msg = make_msg(source, Action.WRITE, f"[JOIN] {args.name} ({args.model}) 已加入討論")
+    join_msg = make_msg(
+        source, Action.WRITE, f"[JOIN] {args.name} ({args.model}) 已加入討論"
+    )
     dealer.send_string(encode_msg(join_msg))
 
     try:
@@ -50,6 +57,14 @@ def main():
             print(f"[JOIN] {args.name} ({args.model}) 已加入 - 收到回覆")
         else:
             print(f"[JOIN] {args.name} ({args.model}) 已加入 - 無回覆")
+
+        # Send self-introduction if provided
+        if args.intro:
+            intro_msg = make_msg(source, Action.WRITE, args.intro)
+            dealer.send_string(encode_msg(intro_msg))
+            if dict(poller.poll(timeout=2000)):
+                dealer.recv_string()
+            print(f"[INTRO] 自我介紹已發送")
     except Exception as e:
         print(f"[JOIN] {args.name} ({args.model}) 已加入 - 錯誤: {e}")
     finally:
