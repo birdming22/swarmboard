@@ -208,3 +208,5 @@ __marimo__/
 .blackboxcli/
 data/blackboard.json
 .sisyphus/
+data/status.json
+data/pending.json
