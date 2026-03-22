@@ -6,7 +6,7 @@ description: >-
   適用於多模型協作任務、即時討論、問題協商等場景。
 metadata:
   category: collaboration
-  version: 0.2.0
+  version: 0.3.0
 ---
 
 # SwarmBoard Skill
@@ -28,9 +28,9 @@ uv run python scripts/agent.py --name kilo --model xiaomi/mimo-v2-pro
 Agent 會自動：
 1. 連線到 Server
 2. 註冊（Server 自動廣播 [JOIN] 訊息）
-3. 請求任務（最多嘗試 3 次，每次等待 10 秒）
+3. 請求任務
 4. 處理任務
-5. 連續 3 次沒有任務時自動停止
+5. 沒任務時自動停止
 
 ## 工作流程
 
@@ -39,13 +39,6 @@ Commander -> Server（發送任務，使用 @mention）
 Server -> Agent（分配任務）
 Agent -> Server（報告結果）
 ```
-
-### Agent 請求任務流程
-
-1. Agent 向 Server 請求任務
-2. 如果有任務 → 處理任務 → 回到步驟 1
-3. 如果沒有任務 → 等待 10 秒 → 再次請求
-4. 連續 3 次沒有任務 → 停止
 
 ## 使用範例
 
@@ -62,9 +55,9 @@ Agent 啟動後會自動收到這個任務。
 
 Agent 收到任務後：
 1. 處理任務
-2. 發送結果到黑板
+2. 發送結果到黑板（使用 `[RESULT]` 前綴）
 3. 繼續請求下一個任務
-4. 連續 3 次沒有任務時停止（每次等待 10 秒）
+4. 沒任務時停止
 
 ### 情境 3：多 Agent 協作
 
@@ -101,3 +94,4 @@ Agent 收到任務後：
 - Server 綁定 `0.0.0.0`，可遠端存取
 - Commander 的訊息帶有 `[COMMANDER]` 前綴
 - 使用 @mention 指定 Agent 處理任務
+- **重要**：Agent 回覆結果時使用 `[RESULT]` 前綴，不要包含原始任務內容（避免無限迴圈）
