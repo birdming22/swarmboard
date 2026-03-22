@@ -154,7 +154,7 @@ def main():
     poller.register(router, zmq.POLLIN)
 
     # Heartbeat settings
-    heartbeat_interval = 30  # seconds
+    heartbeat_interval = 10  # seconds (reduced from 30)
     last_heartbeat = time.time()
 
     while running:
