@@ -353,12 +353,19 @@ def main():
                     f"ASSIGN_TASK to {instance_id}: {found_task['content'][:50]}"
                 )
             else:
+                wait_task = {
+                    "msg_id": f"wait-{uuid.uuid4().hex[:8]}",
+                    "timestamp": int(time.time()),
+                    "source": server_source,
+                    "action": Action.WRITE.value,
+                    "content": "[WAIT] 請稍等，30秒後再來領任務",
+                }
                 response = make_msg(
                     server_source,
-                    Action.NO_TASK,
-                    "No tasks available",
+                    Action.ASSIGN_TASK,
+                    json.dumps(wait_task, ensure_ascii=False),
                 )
-                logger.info(f"NO_TASK for {instance_id}")
+                logger.info(f"WAIT_TASK to {instance_id}")
 
             router.send_multipart([client_id, encode_msg(response).encode("utf-8")])
 
