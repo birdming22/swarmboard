@@ -27,6 +27,11 @@ class Action(str, Enum):
     READ_REQUEST = "READ_REQUEST"
     READ_RESPONSE = "READ_RESPONSE"
     STATE_UPDATE = "STATE_UPDATE"
+    REGISTER = "REGISTER"
+    REGISTER_ACK = "REGISTER_ACK"
+    REQUEST_TASK = "REQUEST_TASK"
+    ASSIGN_TASK = "ASSIGN_TASK"
+    NO_TASK = "NO_TASK"
 
 
 def make_source(instance_id: str, model_name: str, role: str) -> dict:

@@ -15,6 +15,7 @@ import json
 import signal
 import sys
 import time
+import uuid
 from pathlib import Path
 
 import zmq
@@ -88,6 +89,12 @@ def main():
     # In-memory blackboard: list of message dicts
     blackboard: list[dict] = []
 
+    # Registered agents: dict of instance_id -> agent info
+    agents: dict[str, dict] = {}
+
+    # Task queue: list of pending tasks (messages that need processing)
+    task_queue: list[dict] = []
+
     # Load from file if exists
     if data_file.exists():
         try:
@@ -155,6 +162,85 @@ def main():
             logger.info(
                 f"READ_REQUEST from {instance_id} → sent {len(blackboard)} entries"
             )
+
+        elif action == Action.REGISTER.value:
+            # Register agent
+            agent_info = {
+                "instance_id": instance_id,
+                "model_name": source.get("model_name", "unknown"),
+                "name": msg.get("content", source.get("model_name", "unknown")),
+                "registered_at": int(time.time()),
+                "last_seen": int(time.time()),
+            }
+            agents[instance_id] = agent_info
+            logger.info(f"REGISTER from {instance_id} ({agent_info['name']})")
+
+            # Broadcast agent joined
+            join_entry = {
+                "msg_id": f"msg-{uuid.uuid4().hex[:8]}",
+                "timestamp": int(time.time()),
+                "source": source,
+                "action": Action.WRITE.value,
+                "content": f"[JOIN] {agent_info['name']} ({agent_info['model_name']}) 已加入",
+            }
+            blackboard.append(join_entry)
+            save_blackboard()
+
+            # Broadcast via PUB
+            pub_update = make_msg(
+                server_source,
+                Action.STATE_UPDATE,
+                json.dumps(join_entry, ensure_ascii=False),
+            )
+            pub.send_string("blackboard", zmq.SNDMORE)
+            pub.send_string(encode_msg(pub_update))
+
+            # Send ACK to agent
+            ack = make_msg(
+                server_source,
+                Action.REGISTER_ACK,
+                json.dumps({"status": "ok", "name": agent_info["name"]}),
+            )
+            router.send_multipart([client_id, encode_msg(ack).encode("utf-8")])
+
+        elif action == Action.REQUEST_TASK.value:
+            # Update last seen
+            if instance_id in agents:
+                agents[instance_id]["last_seen"] = int(time.time())
+
+            # Find task for this agent (message with @mention)
+            agent_name = agents.get(instance_id, {}).get("name", "")
+            model_name = source.get("model_name", "")
+
+            found_task = None
+            for entry in blackboard:
+                content = entry.get("content", "")
+                # Check if this message mentions the agent
+                if f"@{agent_name}" in content or f"@{model_name}" in content:
+                    # Check if already assigned
+                    if not entry.get("assigned_to"):
+                        found_task = entry
+                        entry["assigned_to"] = instance_id
+                        break
+
+            if found_task:
+                response = make_msg(
+                    server_source,
+                    Action.ASSIGN_TASK,
+                    json.dumps(found_task, ensure_ascii=False),
+                )
+                logger.info(
+                    f"ASSIGN_TASK to {instance_id}: {found_task['content'][:50]}"
+                )
+            else:
+                response = make_msg(
+                    server_source,
+                    Action.NO_TASK,
+                    "No tasks available",
+                )
+                logger.info(f"NO_TASK for {instance_id}")
+
+            router.send_multipart([client_id, encode_msg(response).encode("utf-8")])
 
         elif action == Action.WRITE.value:
             # Append to blackboard
