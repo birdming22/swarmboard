@@ -127,7 +127,8 @@ def main():
 /help - 顯示此幫助訊息
 /version - 顯示 Server 版本
 /status - 顯示 Server 狀態
-/sessions - 列出已註冊的 Agent"""
+/sessions - 列出已註冊的 Agent
+/reload - 重新載入黑板"""
 
         elif cmd == "/version":
             return f"SwarmBoard Server v{SERVER_VERSION}"
@@ -150,6 +151,19 @@ def main():
                 age = int(time.time()) - last_seen
                 lines.append(f"- {name} ({model}) - {age}秒前活動")
             return "\n".join(lines)
+
+        elif cmd == "/reload":
+            # Reload blackboard from file
+            try:
+                if data_file.exists():
+                    new_blackboard = json.loads(data_file.read_text())
+                    blackboard.clear()
+                    blackboard.extend(new_blackboard)
+                    return f"已重新載入 {len(blackboard)} 條黑板訊息"
+                else:
+                    return "黑板檔案不存在"
+            except Exception as e:
+                return f"載入失敗: {e}"
 
         else:
             return f"未知命令：{cmd}。輸入 /help 查看可用命令。"
