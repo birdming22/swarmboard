@@ -153,6 +153,10 @@ def main():
     poller = zmq.Poller()
     poller.register(router, zmq.POLLIN)
 
+    # Heartbeat settings
+    heartbeat_interval = 30  # seconds
+    last_heartbeat = time.time()
+
     while running:
         try:
             socks = dict(poller.poll(timeout=500))
@@ -160,6 +164,26 @@ def main():
             if not running:
                 break
             continue
+
+        # Send heartbeat to registered agents
+        current_time = time.time()
+        if current_time - last_heartbeat >= heartbeat_interval:
+            for instance_id in list(agents.keys()):
+                heartbeat_msg = make_msg(
+                    server_source, Action.STATE_UPDATE, "heartbeat"
+                )
+                try:
+                    router.send_multipart(
+                        [
+                            instance_id.encode("utf-8"),
+                            encode_msg(heartbeat_msg).encode("utf-8"),
+                        ]
+                    )
+                except Exception:
+                    pass  # Agent may have disconnected
+            last_heartbeat = current_time
+            if agents:
+                logger.debug(f"Heartbeat sent to {len(agents)} agents")
 
         if router not in socks:
             continue
