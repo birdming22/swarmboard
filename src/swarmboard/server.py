@@ -253,13 +253,15 @@ def main():
             router.send_multipart([client_id, encode_msg(response).encode("utf-8")])
 
         elif action == Action.WRITE.value:
+            content = msg.get("content", "")
+
             # Append to blackboard
             entry = {
                 "msg_id": msg.get("msg_id", f"msg-{int(time.time() * 1000)}"),
                 "timestamp": msg.get("timestamp", int(time.time())),
                 "source": source,
                 "action": Action.WRITE.value,
-                "content": msg.get("content", ""),
+                "content": content,
             }
             blackboard.append(entry)
 
@@ -275,14 +277,15 @@ def main():
                 ]
             )
 
-            # Broadcast via PUB
-            pub_update = make_msg(
-                server_source,
-                Action.STATE_UPDATE,
-                json.dumps(entry, ensure_ascii=False),
-            )
-            pub.send_string("blackboard", zmq.SNDMORE)
-            pub.send_string(encode_msg(pub_update))
+            # Broadcast via PUB (skip [RESULT] messages)
+            if not content.startswith("[RESULT]"):
+                pub_update = make_msg(
+                    server_source,
+                    Action.STATE_UPDATE,
+                    json.dumps(entry, ensure_ascii=False),
+                )
+                pub.send_string("blackboard", zmq.SNDMORE)
+                pub.send_string(encode_msg(pub_update))
 
             model = source.get("model_name", "?")
             logger.info(f"WRITE from {instance_id} ({model}): {entry['content'][:80]}")

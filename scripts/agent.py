@@ -65,10 +65,14 @@ def main():
         return
 
     # Step 2: Request tasks loop
+    # Try up to 3 times, wait 10 seconds between attempts if no task
     print(f"[agent] Ready to receive tasks")
     task_count = 0
+    max_retries = 3
+    retry_wait = 10
+    no_task_count = 0
 
-    while True:
+    while no_task_count < max_retries:
         # Request task
         request_msg = make_msg(source, Action.REQUEST_TASK, "")
         dealer.send_string(encode_msg(request_msg))
@@ -87,24 +91,32 @@ def main():
                     task_content = task_data.get("content", "")
                     task_msg_id = task_data.get("msg_id", "")
                     task_count += 1
+                    no_task_count = 0  # Reset counter when task found
                     print(f"[agent] Task #{task_count}: {task_content[:100]}")
 
-                    # TODO: Process task here
-                    # For now, just send a confirmation (without original content to avoid loop)
-                    confirm_msg = make_msg(
+                    # Process task - send result to blackboard
+                    result_msg = make_msg(
                         source,
                         Action.WRITE,
                         f"[RESULT] {args.name} 已處理任務 #{task_count}",
                     )
-                    dealer.send_string(encode_msg(confirm_msg))
+                    dealer.send_string(encode_msg(result_msg))
                     dealer.recv_string()  # ACK
 
                 elif action == Action.NO_TASK.value:
-                    print(f"[agent] No more tasks, stopping")
-                    break
+                    no_task_count += 1
+                    if no_task_count < max_retries:
+                        print(
+                            f"[agent] No task, waiting {retry_wait}s (attempt {no_task_count}/{max_retries})"
+                        )
+                        time.sleep(retry_wait)
+                    else:
+                        print(
+                            f"[agent] No tasks after {max_retries} attempts, stopping"
+                        )
 
         else:
-            print(f"[agent] Timeout waiting for task")
+            print(f"[agent] Timeout waiting for response")
             time.sleep(1)
 
     print(f"[agent] Processed {task_count} tasks, exiting")
