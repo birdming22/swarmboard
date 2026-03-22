@@ -10,6 +10,8 @@ Usage:
   uv run swarmboard-server [--router-bind tcp://0.0.0.0:5570] [--pub-bind tcp://0.0.0.0:5571]
 """
 
+SERVER_VERSION = "0.5.0"  # Version with heartbeat feature
+
 import argparse
 import json
 import signal
@@ -123,11 +125,16 @@ def main():
         if cmd == "/help":
             return """可用命令：
 /help - 顯示此幫助訊息
+/version - 顯示 Server 版本
 /status - 顯示 Server 狀態
 /sessions - 列出已註冊的 Agent"""
 
+        elif cmd == "/version":
+            return f"SwarmBoard Server v{SERVER_VERSION}"
+
         elif cmd == "/status":
             return f"""Server 狀態：
+- 版本：{SERVER_VERSION}
 - 已註冊 Agent：{len(agents)} 個
 - 黑板訊息數：{len(blackboard)} 條
 - 任務隊列：{len(task_queue)} 個"""
