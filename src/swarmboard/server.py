@@ -112,6 +112,41 @@ def main():
 
     server_source = make_source("server", "swarmboard", "server")
 
+    def handle_command(content: str, source: dict) -> str | None:
+        """Handle commands starting with /."""
+        if not content.startswith("/"):
+            return None
+
+        parts = content.split()
+        cmd = parts[0].lower()
+
+        if cmd == "/help":
+            return """可用命令：
+/help - 顯示此幫助訊息
+/status - 顯示 Server 狀態
+/sessions - 列出已註冊的 Agent"""
+
+        elif cmd == "/status":
+            return f"""Server 狀態：
+- 已註冊 Agent：{len(agents)} 個
+- 黑板訊息數：{len(blackboard)} 條
+- 任務隊列：{len(task_queue)} 個"""
+
+        elif cmd == "/sessions":
+            if not agents:
+                return "目前沒有已註冊的 Agent"
+            lines = ["已註冊的 Agent："]
+            for instance_id, info in agents.items():
+                name = info.get("name", "unknown")
+                model = info.get("model_name", "unknown")
+                last_seen = info.get("last_seen", 0)
+                age = int(time.time()) - last_seen
+                lines.append(f"- {name} ({model}) - {age}秒前活動")
+            return "\n".join(lines)
+
+        else:
+            return f"未知命令：{cmd}。輸入 /help 查看可用命令。"
+
     logger.info(f"ROUTER bound to {args.router_bind}")
     logger.info(f"PUB    bound to {args.pub_bind}")
 
@@ -254,6 +289,13 @@ def main():
 
         elif action == Action.WRITE.value:
             content = msg.get("content", "")
+
+            cmd_response = handle_command(content, source)
+            if cmd_response:
+                response = make_msg(server_source, Action.WRITE, cmd_response)
+                router.send_multipart([client_id, encode_msg(response).encode("utf-8")])
+                logger.info(f"COMMAND from {instance_id}: {content}")
+                continue
 
             # Append to blackboard
             entry = {
