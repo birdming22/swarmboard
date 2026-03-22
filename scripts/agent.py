@@ -85,15 +85,16 @@ def main():
                     # Process task
                     task_data = json.loads(response.get("content", "{}"))
                     task_content = task_data.get("content", "")
+                    task_msg_id = task_data.get("msg_id", "")
                     task_count += 1
                     print(f"[agent] Task #{task_count}: {task_content[:100]}")
 
                     # TODO: Process task here
-                    # For now, just send a confirmation
+                    # For now, just send a confirmation (without original content to avoid loop)
                     confirm_msg = make_msg(
                         source,
                         Action.WRITE,
-                        f"@Commander 收到任務 #{task_count}：{task_content[:50]}...",
+                        f"[RESULT] {args.name} 已處理任務 #{task_count}",
                     )
                     dealer.send_string(encode_msg(confirm_msg))
                     dealer.recv_string()  # ACK

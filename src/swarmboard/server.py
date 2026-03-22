@@ -215,13 +215,23 @@ def main():
             found_task = None
             for entry in blackboard:
                 content = entry.get("content", "")
+                entry_source = entry.get("source", {})
+                entry_instance = entry_source.get("instance_id", "")
+                # Skip if:
+                # 1. Already assigned
+                # 2. Is a RESULT message
+                # 3. From the same agent
+                if entry.get("assigned_to"):
+                    continue
+                if content.startswith("[RESULT]"):
+                    continue
+                if entry_instance == instance_id:
+                    continue
                 # Check if this message mentions the agent
                 if f"@{agent_name}" in content or f"@{model_name}" in content:
-                    # Check if already assigned
-                    if not entry.get("assigned_to"):
-                        found_task = entry
-                        entry["assigned_to"] = instance_id
-                        break
+                    found_task = entry
+                    entry["assigned_to"] = instance_id
+                    break
 
             if found_task:
                 response = make_msg(
