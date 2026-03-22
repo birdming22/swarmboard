@@ -178,6 +178,12 @@ def main():
     heartbeat_interval = 10  # seconds (reduced from 30)
     last_heartbeat = time.time()
 
+    # File watcher for hot reload
+    server_file = Path(__file__)
+    last_modified = server_file.stat().st_mtime
+    file_check_interval = 5  # Check every 5 seconds
+    last_file_check = time.time()
+
     while running:
         try:
             socks = dict(poller.poll(timeout=500))
@@ -205,6 +211,30 @@ def main():
             last_heartbeat = current_time
             if agents:
                 logger.debug(f"Heartbeat sent to {len(agents)} agents")
+
+        # Check if server.py has been modified (hot reload)
+        if current_time - last_file_check >= file_check_interval:
+            last_file_check = current_time
+            try:
+                current_modified = server_file.stat().st_mtime
+                if current_modified > last_modified:
+                    last_modified = current_modified
+                    logger.info(
+                        f"Detected change in {server_file.name}, reloading blackboard..."
+                    )
+                    # Reload blackboard from file
+                    if data_file.exists():
+                        try:
+                            new_blackboard = json.loads(data_file.read_text())
+                            blackboard.clear()
+                            blackboard.extend(new_blackboard)
+                            logger.info(
+                                f"Reloaded {len(blackboard)} entries from {data_file}"
+                            )
+                        except Exception as e:
+                            logger.error(f"Failed to reload blackboard: {e}")
+            except Exception:
+                pass  # File may not exist or be inaccessible
 
         if router not in socks:
             continue
