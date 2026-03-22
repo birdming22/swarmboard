@@ -1,5 +1,5 @@
 {
-  "timestamp": 1774114408.192732,
+  "timestamp": 1774172753.0724611,
   "passed": 7,
   "failed": 0,
   "total": 7,
@@ -7,21 +7,21 @@
     {
       "name": "init.py help",
       "passed": true,
-      "stdout": "usage: init.py [-h] --name NAME --model MODEL [--router ROUTER]\n\nRegister to SwarmBoard\n\noptions:\n  -h, --help       show this help message and exit\n  --name NAME      Agent name\n  --model MODEL    Model name\n  --router ROUTER  Server ROUTER endpoint\n",
+      "stdout": "usage: init.py [-h] --name NAME --model MODEL [--intro INTRO]\n               [--router ROUTER]\n\nRegister to SwarmBoard\n\noptions:\n  -h, --help       show this help message and exit\n  --name NAME      Agent name\n  --model MODEL    Model name\n  --intro INTRO    Self-introduction message (optional)\n  --router ROUTER  Server ROUTER endpoint\n",
       "stderr": "",
       "returncode": 0
     },
     {
       "name": "send.py help",
       "passed": true,
-      "stdout": "usage: send.py [-h] [--model MODEL] [--router ROUTER] [--pub PUB] message\n\nSend a message to SwarmBoard\n\npositional arguments:\n  message          Message content to send\n\noptions:\n  -h, --help       show this help message and exit\n  --model MODEL    Model name (default: kilocode)\n  --router ROUTER  Server ROUTER endpoint (default: tcp://127.0.0.1:5570)\n  --pub PUB        Server PUB endpoint (default: tcp://127.0.0.1:5571)\n",
+      "stdout": "usage: send.py [-h] [--model MODEL] [--router ROUTER] [--pub PUB]\n               [--retries RETRIES] [--timeout TIMEOUT]\n               message\n\nSend a message to SwarmBoard\n\npositional arguments:\n  message            Message content to send\n\noptions:\n  -h, --help         show this help message and exit\n  --model MODEL      Model name (default: kilocode)\n  --router ROUTER    Server ROUTER endpoint (default: tcp://127.0.0.1:5570)\n  --pub PUB          Server PUB endpoint (default: tcp://127.0.0.1:",
       "stderr": "",
       "returncode": 0
     },
     {
       "name": "read.py help",
       "passed": true,
-      "stdout": "[\n  {\n    \"msg_id\": \"msg-4a2f0f31\",\n    \"timestamp\": 1774088356,\n    \"source\": {\n      \"instance_id\": \"cmd-commander-13e4\",\n      \"model_name\": \"human\",\n      \"role\": \"human_commander\"\n    },\n    \"action\": \"WRITE\",\n    \"content\": \"[COMMANDER] @all hello\"\n  },\n  {\n    \"msg_id\": \"msg-1774088376\",\n    \"timestamp\": 1774088376,\n    \"source\": {\n      \"instance_id\": \"ai-xiaomi-mimo-v2-pro-8376\",\n      \"model_name\": \"xiaomi-mimo-v2-pro\",\n      \"role\": \"ai_agent\"\n    },\n    \"action\": \"WRITE\",\n    \"conten",
+      "stdout": "usage: read.py [-h] [--router ROUTER] [--retries RETRIES] [--timeout TIMEOUT]\n\nRead messages from SwarmBoard\n\noptions:\n  -h, --help         show this help message and exit\n  --router ROUTER    Server ROUTER endpoint\n  --retries RETRIES  Number of retries on failure\n  --timeout TIMEOUT  Timeout in milliseconds\n",
       "stderr": "",
       "returncode": 0
     },

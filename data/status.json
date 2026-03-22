@@ -2,7 +2,7 @@
   "agents": {
     "xiaomi/mimo-v2-pro": {
       "status": "listening",
-      "last_heartbeat": 1774171518,
+      "last_heartbeat": 1774180848,
       "instance_id": "xiaomi/mimo-v2-pro-961527"
     }
   }
