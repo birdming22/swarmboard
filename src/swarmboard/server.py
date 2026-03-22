@@ -10,7 +10,7 @@ Usage:
   uv run swarmboard-server [--router-bind tcp://0.0.0.0:5570] [--pub-bind tcp://0.0.0.0:5571]
 """
 
-SERVER_VERSION = "0.5.0"  # Version with heartbeat feature
+SERVER_VERSION = "0.6.0"  # Version with session management
 
 import argparse
 import json
@@ -97,6 +97,12 @@ def main():
     # Task queue: list of pending tasks (messages that need processing)
     task_queue: list[dict] = []
 
+    # Session management: timestamp when current session started
+    # By default, start a session at server startup
+    session_start_time: int = int(time.time())
+    session_id: str = f"session-{uuid.uuid4().hex[:8]}"
+    logger.info(f"Session started: {session_id} at {session_start_time}")
+
     # Load from file if exists
     if data_file.exists():
         try:
@@ -116,6 +122,7 @@ def main():
 
     def handle_command(content: str, source: dict) -> str | None:
         """Handle commands starting with /."""
+        nonlocal session_start_time, session_id
         if not content.startswith("/"):
             return None
 
@@ -128,17 +135,47 @@ def main():
 /version - 顯示 Server 版本
 /status - 顯示 Server 狀態
 /sessions - 列出已註冊的 Agent
+/new-session - 開始新的 Session（清除舊訊息）
 /reload - 重新載入黑板"""
 
         elif cmd == "/version":
             return f"SwarmBoard Server v{SERVER_VERSION}"
 
         elif cmd == "/status":
+            session_duration = int(time.time()) - session_start_time
+            session_msg_count = sum(
+                1
+                for entry in blackboard
+                if entry.get("timestamp", 0) >= session_start_time
+            )
             return f"""Server 狀態：
 - 版本：{SERVER_VERSION}
+- Session ID：{session_id}
+- Session 時間：{session_duration} 秒
+- Session 訊息數：{session_msg_count} 條
 - 已註冊 Agent：{len(agents)} 個
-- 黑板訊息數：{len(blackboard)} 條
+- 黑板總訊息數：{len(blackboard)} 條
 - 任務隊列：{len(task_queue)} 個"""
+
+        elif cmd == "/new-session":
+            # Start a new session
+            old_session_id = session_id
+            session_start_time = int(time.time())
+            session_id = f"session-{uuid.uuid4().hex[:8]}"
+            logger.info(f"New session started: {session_id} (was: {old_session_id})")
+
+            # Announce the new session
+            new_session_entry = {
+                "msg_id": f"msg-{uuid.uuid4().hex[:8]}",
+                "timestamp": session_start_time,
+                "source": source,
+                "action": Action.WRITE.value,
+                "content": f"[SESSION] 新 Session 開始：{session_id}",
+            }
+            blackboard.append(new_session_entry)
+            save_blackboard()
+
+            return f"新 Session 已開始：{session_id}（舊 Session：{old_session_id}）"
 
         elif cmd == "/sessions":
             if not agents:
@@ -257,11 +294,16 @@ def main():
         instance_id = source.get("instance_id", "unknown")
 
         if action == Action.READ_REQUEST.value:
-            # Return full blackboard history
+            # Filter blackboard by current session
+            session_messages = [
+                entry
+                for entry in blackboard
+                if entry.get("timestamp", 0) >= session_start_time
+            ]
             response = make_msg(
                 server_source,
                 Action.READ_RESPONSE,
-                json.dumps(blackboard, ensure_ascii=False),
+                json.dumps(session_messages, ensure_ascii=False),
             )
             router.send_multipart(
                 [
@@ -270,7 +312,7 @@ def main():
                 ]
             )
             logger.info(
-                f"READ_REQUEST from {instance_id} → sent {len(blackboard)} entries"
+                f"READ_REQUEST from {instance_id} → sent {len(session_messages)}/{len(blackboard)} entries (session: {session_id})"
             )
 
         elif action == Action.REGISTER.value:
