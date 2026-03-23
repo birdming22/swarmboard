@@ -34,11 +34,25 @@ from fastapi import (
 )
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from loguru import logger
 import trio
 from hypercorn.config import Config
 from hypercorn.trio import serve
 
 SERVER_VERSION = "0.7.0"
+
+LOG_FILE = Path(__file__).parent.parent / "logs" / "server_v2.log"
+LOG_FILE.parent.mkdir(exist_ok=True)
+logger.add(
+    LOG_FILE,
+    rotation="10 MB",
+    retention="1 day",
+    level="DEBUG",
+    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {message}",
+)
+
+DATA_FILE = Path(__file__).parent.parent / "data" / "server_v2.json"
+DATA_FILE.parent.mkdir(exist_ok=True)
 
 
 def create_token(instance_id: str, secret: str = "swarmboard-secret") -> str:
@@ -147,6 +161,9 @@ ws_clients: list[WebSocket] = []
 # Token storage
 tokens: dict[str, dict] = {}
 
+# Track registered names (for duplicate check)
+registered_names: dict[str, str] = {}
+
 # Track clients that have called /messages (for welcome message)
 seen_clients: set[str] = set()
 
@@ -168,20 +185,85 @@ tokens[COMMANDER_TOKEN] = {
 }
 
 
+def save_state():
+    try:
+        state = {
+            "messages": messages,
+            "rooms": {
+                k: {
+                    "name": v["name"],
+                    "messages": v["messages"],
+                    "members": list(v["members"]),
+                }
+                for k, v in rooms.items()
+            },
+            "current_session_id": current_session_id,
+            "sessions": sessions,
+            "registered_names": registered_names,
+        }
+        DATA_FILE.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+        logger.debug(f"Saved {len(messages)} messages to {DATA_FILE}")
+    except Exception as e:
+        logger.error(f"Failed to save state: {e}")
+
+
+def load_state():
+    global messages, rooms, current_session_id, sessions, registered_names
+    if DATA_FILE.exists():
+        try:
+            state = json.loads(DATA_FILE.read_text())
+            messages = state.get("messages", [])
+            rooms = {
+                k: {
+                    "name": v["name"],
+                    "messages": v["messages"],
+                    "members": set(v["members"]),
+                }
+                for k, v in state.get(
+                    "rooms", {"lobby": {"name": "lobby", "messages": [], "members": []}}
+                ).items()
+            }
+            current_session_id = state.get("current_session_id", current_session_id)
+            sessions = state.get("sessions", {})
+            registered_names = state.get("registered_names", {})
+            logger.info(
+                f"Loaded {len(messages)} messages, {len(rooms)} rooms from {DATA_FILE}"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to load state: {e}")
+
+
+# Load state on startup
+load_state()
+
+
 # ================== Auth Endpoints ==================
 
 
 @app.post("/auth/register")
 async def register(auth: AuthRequest):
     """Register and get token."""
-    token = create_token(auth.instance_id)
+    instance_id = auth.instance_id
+
+    # Check for duplicate name
+    if instance_id in registered_names:
+        existing_token = registered_names[instance_id]
+        raise HTTPException(
+            status_code=409,
+            detail=f"名字 '{instance_id}' 已被使用。請換一個名字（例如: {instance_id}-2）",
+        )
+
+    token = create_token(instance_id)
     tokens[token] = {
-        "instance_id": auth.instance_id,
+        "instance_id": instance_id,
         "model_name": auth.model_name,
         "role": auth.role,
         "created_at": time.time(),
     }
-    return {"token": token, "instance_id": auth.instance_id}
+    registered_names[instance_id] = token
+    save_state()
+    logger.info(f"Registered: {instance_id} ({auth.model_name})")
+    return {"token": token, "instance_id": instance_id}
 
 
 async def get_current_client(authorization: Optional[str] = Header(None)) -> dict:
@@ -303,6 +385,7 @@ async def send_message(message: Message, client: dict = Depends(get_current_clie
 
     # Broadcast to WebSocket clients
     await broadcast_message(msg)
+    save_state()
 
     return {"status": "ok", "msg_id": msg["msg_id"]}
 
