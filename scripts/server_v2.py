@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import random
 import sys
 import time
 import uuid
@@ -356,6 +357,7 @@ async def get_messages(
             )
             filtered = mention_tasks[:1]
         else:
+            wait_seconds = random.randint(10, 120)
             wait_msg = {
                 "msg_id": f"wait-{int(time.time())}",
                 "timestamp": int(time.time()),
@@ -364,11 +366,12 @@ async def get_messages(
                     "model_name": "system",
                     "role": "system",
                 },
-                "content": "[WAIT] 沒有新任務，請稍後再來領取",
+                "content": f"[WAIT] 沒有新任務，請 {wait_seconds} 秒後再來領取",
+                "wait_seconds": wait_seconds,
                 "session": current_session_id,
             }
             filtered = [wait_msg]
-            logger.info(f"WAIT for {instance_id}")
+            logger.info(f"WAIT for {instance_id}: {wait_seconds}s")
 
     # Check if new client - inject welcome as system message (only for this client)
     if instance_id not in seen_clients:
