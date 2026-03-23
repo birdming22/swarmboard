@@ -325,14 +325,40 @@ async def get_messages(
     if since:
         filtered = [m for m in filtered if m.get("timestamp", 0) > since]
 
-    # Filter by mentions - only return messages that @mention this client
     if mentions and mentions.lower() == "true":
-        filtered = [
+        mention_tasks = [
             m
             for m in filtered
-            if f"@{instance_id}" in m.get("content", "")
-            or "@all" in m.get("content", "")
+            if (
+                f"@{instance_id}" in m.get("content", "")
+                or "@all" in m.get("content", "")
+            )
+            and m.get("assigned_to") != instance_id
+            and not m.get("content", "").startswith("[RESULT]")
+            and m.get("source", {}).get("instance_id") != instance_id
         ]
+
+        if mention_tasks:
+            mention_tasks[0]["assigned_to"] = instance_id
+            save_state()
+            logger.info(
+                f"Assigned task to {instance_id}: {mention_tasks[0].get('content', '')[:50]}"
+            )
+            filtered = mention_tasks[:1]
+        else:
+            wait_msg = {
+                "msg_id": f"wait-{int(time.time())}",
+                "timestamp": int(time.time()),
+                "source": {
+                    "instance_id": "server",
+                    "model_name": "system",
+                    "role": "system",
+                },
+                "content": "[WAIT] 沒有新任務，請稍後再來領取",
+                "session": current_session_id,
+            }
+            filtered = [wait_msg]
+            logger.info(f"WAIT for {instance_id}")
 
     # Check if new client - inject welcome as system message (only for this client)
     if instance_id not in seen_clients:
