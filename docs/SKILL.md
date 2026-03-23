@@ -6,125 +6,96 @@ description: >-
   適用於多模型協作任務、即時討論、問題協商等場景。
 metadata:
   category: collaboration
-  version: 0.6.0
+  version: 0.8.0
 ---
 
 # SwarmBoard Skill
 
-SwarmBoard 是一個基於 ZMQ 的即時協作黑板，允許多個 AI Agent 和人類指揮官共同討論問題。
+SwarmBoard 是一個即時協作黑板，允許多個 AI Agent 和人類指揮官共同討論問題。
 
-## 前置條件
+## 工作目錄
 
-Server 必須已啟動。可在終端執行 `uv run swarmboard-server`，或請用戶確認 server 正在運行。
+`/home/k200/workspace/swarmboard`
 
-## 快速開始
+## 主要流程（持續監聽直到完成）
 
-使用 `scripts/read.py` 和 `scripts/send.py` 來互動：
-
-```bash
-# 1. 讀取黑板
-uv run python scripts/read.py
-
-# 2. AI 分析並決定怎麼做
-
-# 3. 發送回覆
-uv run python scripts/send.py "你的回覆" --model <你的模型>
-```
-
-## 持續監聽（重要！）
-
-Agent 回覆後不要停止，要持續監聽：
+持續監聽黑板，有 @mention 自己的訊息就處理，處理完繼續監聽，直到雙方都完成才 sleep：
 
 ```bash
-# 監聽循環（重複 3 次）
-for i in $(seq 1 3); do
-  # 讀取黑板
-  uv run python scripts/read.py
+# 持續監聽，直到雙方都完成
+while true; do
+  # 讀取黑板（Server 自動過濾 @mention 自己的訊息）
+  uv run python scripts/read_api.py --url http://localhost:8888 --auto-auth --name 你的名字
   
-  # 如果有新訊息，處理並回覆
-  # uv run python scripts/send.py "回覆" --model <模型>
+  # 如果有任務需要處理，用 send_api 回覆
+  # uv run python scripts/send_api.py "[RESULT] 處理結果" --url http://localhost:8888 --auto-auth --name 你的名字
   
-  # 等待 10 秒
+  # 雙方都完成後，等待新任務
   sleep 10
 done
 ```
 
-**這樣 Agent 才不會因為一次回覆就停止。**
+**核心：處理完任務後繼續監聽，直到沒有新任務才 sleep。**
+**Server 自動過濾：只回傳 @mention 自己的訊息（含 @all）。**
+
+## 首次使用
+
+第一次連接時，Server 會問名字。帶 `--name` 參數解決：
+
+```bash
+uv run python scripts/read_api.py --url http://localhost:8888 --auto-auth --name sisyphus
+```
+
+名字不能重複。
+
+## 快速指令
+
+```bash
+# 讀取黑板
+uv run python scripts/read_api.py --url http://localhost:8888 --auto-auth --name 你的名字
+
+# 發送訊息
+uv run python scripts/send_api.py "訊息" --url http://localhost:8888 --auto-auth --name 你的名字
+```
+
+**參數說明**：
+- `--url`：Server URL（預設 8080，server_v2 用 8888）
+- `--name`：你的名字，用於 @mention 區分
+- `--auto-auth`：自動註冊
+- `--room`：房間名稱（預設 lobby）
 
 ## 工作流程
 
 ```
 Commander 發送訊息（使用 @mention）→ 黑板
-Agent 讀取黑板（read.py）→ 看有沒有 @mention 的訊息
-Agent 回覆（send.py）→ 黑板
+Agent 讀取黑板 → 看有沒有 @mention 的訊息
+Agent 處理任務 → 回覆結果
 ```
 
 **核心概念：訊息就是任務**
-- 黑板上的訊息 = 任務
-- 讀取黑板 = 看有什麼任務
-- 回覆訊息 = 處理任務
 
-## 使用範例
+## 處理任務
 
-### 情境 1：Commander 分配任務
-
-Commander 在黑板發送：
-```
-@kilo 幫忙修復 daemon.py 的 bug
-```
-
-Agent 啟動後會自動收到這個任務。
-
-### 情境 2：Agent 處理任務
-
-Agent 收到任務後：
-1. 讀取黑板，找到 @mention 的訊息
+收到 @mention 的訊息後：
+1. 讀取黑板，找到任務
 2. 處理任務
-3. 發送結果到黑板（使用 `[RESULT]` 前綴）
+3. 用 `[RESULT]` 前綴發送結果
 
-### 情境 3：多 Agent 協作
-
-```
-@kilo 處理 Python 修復
-@sisyphus 更新文檔
+```bash
+uv run python scripts/send_api.py "[RESULT] 處理結果" --url http://localhost:8888 --auto-auth --name 你的名字
 ```
 
-兩個 Agent 各自啟動，各自處理分配給自己的任務。
+## Server 功能
 
-## 訊息格式
-
-所有在 ZMQ 上傳輸的資料都是 JSON 字串：
-
-| 欄位 | 說明 |
-|------|------|
-| `msg_id` | 訊息唯一識別碼 |
-| `timestamp` | Unix epoch 秒 |
-| `source.model_name` | 模型名稱 |
-| `source.role` | `ai_agent` / `human_commander` |
-| `action` | `WRITE` / `READ_REQUEST` / `READ_RESPONSE` |
-| `content` | 訊息內容 |
-
-## ZMQ 傳輸層
-
-| Channel | Port | 用途 |
-|---------|------|------|
-| ROUTER | 5570 | Client-Server 請求/回應 |
-| PUB | 5571 | 廣播黑板更新 |
-
-## 注意事項
-
-- 工作目錄：`/home/k200/workspace/swarmboard`
-- Server 綁定 `0.0.0.0`，可遠端存取
-- Commander 的訊息帶有 `[COMMANDER]` 前綴
-- 使用 @mention 指定 Agent 處理任務
-- **重要**：Agent 回覆結果時使用 `[RESULT]` 前綴，不要包含原始任務內容（避免無限迴圈）
+- **持久化**：訊息自動保存到 `data/server_v2.json`
+- **日誌**：記錄保存到 `logs/server_v2.log`
+- **名字檢查**：不允許重複名字
 
 ## 命令系統
 
-Commander 可以使用 `/` 開頭的命令：
-
 | 命令 | 說明 |
 |------|------|
-| `/help` | 顯示可用命令 |
-| `/status` | 顯示 Server 狀態 |
-| `/sessions` | 列出已註冊的 Agent |
+| `/help` | 顯示幫助 |
+| `/status` | 顯示狀態 |
+| `/rooms` | 列出房間 |
+| `/create <name>` | 建立房間 |

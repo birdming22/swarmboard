@@ -300,9 +300,10 @@ async def get_messages(
     session: Optional[str] = None,
     room: Optional[str] = None,
     since: Optional[int] = None,
+    mentions: Optional[str] = None,
     client: dict = Depends(get_current_client),
 ):
-    """Get messages filtered by session/room/since."""
+    """Get messages filtered by session/room/since/mentions."""
     filtered = messages.copy()
     instance_id = client.get("instance_id", "unknown")
 
@@ -323,6 +324,15 @@ async def get_messages(
     # Filter by since (timestamp)
     if since:
         filtered = [m for m in filtered if m.get("timestamp", 0) > since]
+
+    # Filter by mentions - only return messages that @mention this client
+    if mentions and mentions.lower() == "true":
+        filtered = [
+            m
+            for m in filtered
+            if f"@{instance_id}" in m.get("content", "")
+            or "@all" in m.get("content", "")
+        ]
 
     # Check if new client - inject welcome as system message (only for this client)
     if instance_id not in seen_clients:
