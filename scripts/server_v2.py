@@ -170,6 +170,9 @@ online_agents: dict[str, int] = {}
 # Track clients that have called /messages (for welcome message)
 seen_clients: set[str] = set()
 
+# Track last read timestamp per client: {instance_id: last_timestamp}
+last_read: dict[str, int] = {}
+
 # Pre-register Commander token for Web UI (port set in main())
 COMMANDER_TOKEN = create_token(
     "commander-web", secret="swarmboard-secret"
@@ -324,9 +327,13 @@ async def get_messages(
         else:
             filtered = []
 
-    # Filter by since (timestamp)
-    if since:
-        filtered = [m for m in filtered if m.get("timestamp", 0) > since]
+    last_ts = last_read.get(instance_id, 0)
+    if since is None:
+        since = last_ts
+    filtered = [m for m in filtered if m.get("timestamp", 0) > since]
+
+    if filtered:
+        last_read[instance_id] = filtered[-1].get("timestamp", 0)
 
     if mentions and mentions.lower() == "true":
         mention_tasks = [
@@ -624,9 +631,19 @@ async def get_status(client: dict = Depends(get_current_client)):
 
 @app.post("/heartbeat")
 async def heartbeat(client: dict = Depends(get_current_client)):
-    """Update heartbeat timestamp."""
+    """Update heartbeat timestamp and cleanup expired agents."""
     instance_id = client["instance_id"]
-    online_agents[instance_id] = int(time.time())
+    now = int(time.time())
+    online_agents[instance_id] = now
+
+    # Cleanup expired agents (no heartbeat for 90 seconds)
+    expired = [uid for uid, t in list(online_agents.items()) if now - t > 90]
+    for uid in expired:
+        del online_agents[uid]
+        if uid in registered_names:
+            del registered_names[uid]
+            logger.info(f"Kicked expired agent: {uid}")
+
     return {"status": "ok", "instance_id": instance_id}
 
 

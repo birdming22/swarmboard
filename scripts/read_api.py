@@ -54,7 +54,11 @@ def get_or_create_token(
 
 
 def read_messages(
-    url: str, token: str, room: Optional[str] = None, since: Optional[int] = None
+    url: str,
+    token: str,
+    room: Optional[str] = None,
+    since: Optional[int] = None,
+    mentions: bool = False,
 ):
     """Read messages from SwarmBoard server."""
     params = []
@@ -62,6 +66,8 @@ def read_messages(
         params.append(f"room={room}")
     if since:
         params.append(f"since={since}")
+    if mentions:
+        params.append("mentions=true")
 
     query = "&".join(params) if params else ""
     full_url = f"{url}/messages"
@@ -132,6 +138,11 @@ def main():
     parser.add_argument(
         "--interval", type=int, default=2, help="Poll interval in seconds"
     )
+    parser.add_argument(
+        "--mentions",
+        action="store_true",
+        help="Only show messages that mention you (@name or @all)",
+    )
     args = parser.parse_args()
 
     token = args.token
@@ -151,7 +162,7 @@ def main():
     if args.poll:
         poll_messages(args.url, token, args.room, args.interval)
     else:
-        messages = read_messages(args.url, token, args.room)
+        messages = read_messages(args.url, token, args.room, mentions=args.mentions)
         for msg in messages:
             print_message(msg)
 
