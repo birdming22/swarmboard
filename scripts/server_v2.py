@@ -164,6 +164,9 @@ tokens: dict[str, dict] = {}
 # Track registered names (for duplicate check)
 registered_names: dict[str, str] = {}
 
+# Track online agents: {instance_id: last_heartbeat}
+online_agents: dict[str, int] = {}
+
 # Track clients that have called /messages (for welcome message)
 seen_clients: set[str] = set()
 
@@ -395,7 +398,27 @@ async def send_message(message: Message, client: dict = Depends(get_current_clie
     """Send a message."""
     # Handle commands
     if message.content.startswith("/"):
-        return await handle_command(message.content, client)
+        response = await handle_command(message.content, client)
+        # Save command response to messages if it's not an error
+        if response.get("status") == "ok":
+            resp_content = response.get("response", "")
+            if resp_content:
+                cmd_msg = {
+                    "msg_id": f"cmd-{uuid.uuid4().hex[:8]}",
+                    "timestamp": int(time.time()),
+                    "source": {
+                        "instance_id": "server",
+                        "model_name": "system",
+                        "role": "system",
+                    },
+                    "action": "COMMAND",
+                    "content": resp_content,
+                    "session": current_session_id,
+                    "room": message.room or "lobby",
+                }
+                messages.append(cmd_msg)
+                save_state()
+        return response
 
     # Create message
     msg = {
@@ -434,8 +457,18 @@ async def handle_command(content: str, client: dict) -> dict:
     if cmd == "/help":
         return {
             "status": "ok",
-            "response": "Commands: /help, /status, /new-session, /rooms, /create <name>, /join <name>, /leave",
+            "response": "Commands: /help, /status, /new-session, /rooms, /online, /create <name>, /join <name>, /leave",
         }
+
+    elif cmd == "/online":
+        now = int(time.time())
+        online = [uid for uid, t in online_agents.items() if now - t < 60]
+        if online:
+            return {
+                "status": "ok",
+                "response": f"在線用戶 ({len(online)}): {', '.join(online)}",
+            }
+        return {"status": "ok", "response": "目前沒有在線用戶"}
 
     elif cmd == "/status":
         return {
@@ -475,10 +508,34 @@ async def handle_command(content: str, client: dict) -> dict:
         room_name = parts[1].lower()
         if room_name not in rooms:
             return {"status": "error", "response": f"Room '{room_name}' not found"}
-        return {"status": "ok", "response": f"Joined room '{room_name}'"}
+        rooms[room_name]["members"].add(client["instance_id"])
+        save_state()
+        logger.info(f"{client['instance_id']} joined {room_name}")
+        return {
+            "status": "ok",
+            "response": f"已加入房間 '{room_name}'（目前 {len(rooms[room_name]['members'])} 人）",
+        }
 
     elif cmd == "/leave":
-        return {"status": "ok", "response": "Left room"}
+        room_name = content.split()[1].lower() if len(content.split()) > 1 else None
+        left_rooms = []
+        if room_name:
+            if (
+                room_name in rooms
+                and client["instance_id"] in rooms[room_name]["members"]
+            ):
+                rooms[room_name]["members"].discard(client["instance_id"])
+                left_rooms.append(room_name)
+        else:
+            for name, data in rooms.items():
+                if client["instance_id"] in data["members"]:
+                    data["members"].discard(client["instance_id"])
+                    left_rooms.append(name)
+        save_state()
+        if left_rooms:
+            logger.info(f"{client['instance_id']} left {', '.join(left_rooms)}")
+            return {"status": "ok", "response": f"已離開房間：{', '.join(left_rooms)}"}
+        return {"status": "ok", "response": "你沒有在任何房間"}
 
     else:
         return {"status": "error", "response": f"Unknown command: {cmd}"}
@@ -552,14 +609,25 @@ async def get_session(client: dict = Depends(get_current_client)):
 @app.get("/status")
 async def get_status(client: dict = Depends(get_current_client)):
     """Get server status."""
+    now = int(time.time())
+    online_count = sum(1 for t in online_agents.values() if now - t < 60)
     return {
         "version": "0.7.0",
         "session": current_session_id,
         "messages": len(messages),
         "rooms": len(rooms),
         "connected_clients": len(tokens),
+        "online_agents": online_count,
         "ws_clients": len(ws_clients),
     }
+
+
+@app.post("/heartbeat")
+async def heartbeat(client: dict = Depends(get_current_client)):
+    """Update heartbeat timestamp."""
+    instance_id = client["instance_id"]
+    online_agents[instance_id] = int(time.time())
+    return {"status": "ok", "instance_id": instance_id}
 
 
 # ================== WebSocket Endpoint ==================

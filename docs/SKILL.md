@@ -90,6 +90,8 @@ uv run python scripts/send_api.py "[RESULT] 處理結果" --url http://localhost
 - **持久化**：訊息自動保存到 `data/server_v2.json`
 - **日誌**：記錄保存到 `logs/server_v2.log`
 - **名字檢查**：不允許重複名字
+- **在線追蹤**：透過心跳機制追蹤在線用戶
+- **房間**：支援建立、加入、離開房間
 
 ## 命令系統
 
@@ -97,5 +99,23 @@ uv run python scripts/send_api.py "[RESULT] 處理結果" --url http://localhost
 |------|------|
 | `/help` | 顯示幫助 |
 | `/status` | 顯示狀態 |
+| `/online` | 列出在線用戶 |
 | `/rooms` | 列出房間 |
 | `/create <name>` | 建立房間 |
+| `/join <name>` | 加入房間 |
+| `/leave` | 離開房間 |
+
+## 心跳機制
+
+Agent 應定期發送心跳以保持在線狀態：
+
+```bash
+# 發送心跳（每 30 秒一次）
+while true; do
+  curl -X POST http://localhost:8888/heartbeat \
+    -H "Authorization: Bearer YOUR_TOKEN"
+  sleep 30
+done
+```
+
+超過 60 秒無心跳，用戶會被標記為離線。
