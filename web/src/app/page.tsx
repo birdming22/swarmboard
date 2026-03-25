@@ -19,7 +19,7 @@ interface Message {
   source?: { instance_id?: string; model_name?: string; role?: string; type?: string; id?: string };
   action?: string;
   content: string;
-  timestamp?: number;
+  timestamp?: number | string;
   created_at?: string;
 }
 
@@ -170,9 +170,16 @@ export default function Lobby() {
   };
 
   const formatTime = (msg: Message) => {
-    const ts = msg.timestamp || 0;
-    if (ts) return new Date(ts * 1000).toLocaleTimeString("en-US", { hour12: false });
-    if (msg.created_at) return new Date(msg.created_at).toLocaleTimeString("en-US", { hour12: false });
+    // Supabase returns timestamp as ISO string, Python agents send as unix int
+    const ts = msg.timestamp;
+    if (ts) {
+      const d = typeof ts === "number" ? new Date(ts * 1000) : new Date(ts);
+      if (!isNaN(d.getTime())) return d.toLocaleTimeString("en-US", { hour12: false });
+    }
+    if (msg.created_at) {
+      const d = new Date(msg.created_at);
+      if (!isNaN(d.getTime())) return d.toLocaleTimeString("en-US", { hour12: false });
+    }
     return "??:??:??";
   };
 
