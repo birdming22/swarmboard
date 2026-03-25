@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import json
+import os
 import random
 import sys
 import time
@@ -39,6 +40,194 @@ from loguru import logger
 import trio
 from hypercorn.config import Config
 from hypercorn.trio import serve
+
+from dotenv import load_dotenv
+from supabase import create_client, Client
+from upstash_redis import Redis
+
+load_dotenv()
+
+# Supabase client (service_role key for server-side)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+supabase: Client | None = None
+if SUPABASE_URL and SUPABASE_KEY:
+    supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Upstash Redis client
+redis: Redis | None = None
+try:
+    redis = Redis.from_env()
+except Exception:
+    pass  # Upstash not configured yet
+
+# Upstash QStash client
+qstash = None
+QSTASH_TOKEN = os.getenv("QSTASH_TOKEN", "")
+QSTASH_CURRENT_SIGNING_KEY = os.getenv("QSTASH_CURRENT_SIGNING_KEY", "")
+QSTASH_NEXT_SIGNING_KEY = os.getenv("QSTASH_NEXT_SIGNING_KEY", "")
+if QSTASH_TOKEN:
+    try:
+        from qstash import QStash
+
+        qstash = QStash(token=QSTASH_TOKEN)
+    except Exception:
+        pass  # qstash not installed
+
+# Room UUID cache: room_name -> room_id (from Supabase)
+_room_id_cache: dict[str, str] = {}
+
+
+def get_room_id(room_name: str) -> str | None:
+    """Resolve room name to Supabase UUID. Returns None if room doesn't exist."""
+    if room_name in _room_id_cache:
+        return _room_id_cache[room_name]
+    if not supabase:
+        return None
+    try:
+        result = supabase.table("rooms").select("id").eq("name", room_name).execute()
+        if result.data:
+            room_id = result.data[0]["id"]
+            _room_id_cache[room_name] = room_id
+            return room_id
+    except Exception as e:
+        logger.error(f"Failed to resolve room '{room_name}': {e}")
+    return None
+
+
+def persist_message_to_supabase(msg: dict, room_name: str) -> str | None:
+    """Persist a message to Supabase messages table. Returns message ID or None."""
+    if not supabase:
+        return None
+    room_id = get_room_id(room_name)
+    if not room_id:
+        logger.warning(f"Cannot persist: room '{room_name}' not found in Supabase")
+        return None
+    try:
+        row = {
+            "room_id": room_id,
+            "msg_id": msg.get("msg_id"),
+            "source": msg.get("source", {}),
+            "action": msg.get("action", "WRITE"),
+            "content": msg.get("content", ""),
+            "room": room_name,
+        }
+        result = supabase.table("messages").insert(row).execute()
+        if result.data:
+            return result.data[0].get("id")
+    except Exception as e:
+        logger.error(f"Failed to persist message to Supabase: {e}")
+    return None
+
+
+async def broadcast_to_room(room_name: str, payload: dict):
+    """Broadcast a message to a Supabase Realtime channel for the given room.
+    This enables cross-platform clients (Python agents, Web UI) to receive messages in real-time.
+    """
+    if not supabase:
+        return
+    try:
+        channel_name = f"realtime:room:{room_name}"
+        channel = supabase.channel(channel_name)
+        # supabase-py channel API: send_broadcast(event, payload)
+        channel.send_broadcast(
+            "message", {"type": "broadcast", "event": "message", "payload": payload}
+        )  # type: ignore[attr-defined]
+        logger.debug(f"Broadcast to {room_name}: {payload.get('content', '')[:50]}")
+    except Exception as e:
+        logger.warning(f"Realtime broadcast failed for {room_name}: {e}")
+
+
+# ================== Redis Helpers ==================
+
+
+def redis_add_online(room: str, agent_id: str) -> bool:
+    """Add agent to online set for a room (Redis Sorted Set)."""
+    if not redis:
+        return False
+    try:
+        key = f"online:{room}"
+        now = int(time.time())
+        redis.zadd(key, {agent_id: now})
+        # Cleanup agents offline > 5 min
+        redis.zremrangebyscore(key, 0, now - 300)
+        logger.debug(f"Redis: {agent_id} online in {room}")
+        return True
+    except Exception as e:
+        logger.warning(f"Redis add_online failed: {e}")
+        return False
+
+
+def redis_remove_online(room: str, agent_id: str) -> bool:
+    """Remove agent from online set for a room."""
+    if not redis:
+        return False
+    try:
+        redis.zrem(f"online:{room}", agent_id)
+        return True
+    except Exception as e:
+        logger.warning(f"Redis remove_online failed: {e}")
+        return False
+
+
+def redis_get_online(room: str) -> list[str]:
+    """Get list of online agents in a room."""
+    if not redis:
+        return []
+    try:
+        now = int(time.time())
+        key = f"online:{room}"
+        # Cleanup expired first
+        redis.zremrangebyscore(key, 0, now - 300)
+        members = redis.zrange(key, 0, -1)
+        return [m if isinstance(m, str) else m.decode() for m in members]
+    except Exception as e:
+        logger.warning(f"Redis get_online failed: {e}")
+        return []
+
+
+def redis_rate_limit(agent_id: str, limit: int = 30, window: int = 60) -> bool:
+    """Check rate limit. Returns True if allowed, False if exceeded."""
+    if not redis:
+        return True  # No Redis = no limit
+    try:
+        key = f"rate:{agent_id}"
+        current = redis.incr(key)
+        if current == 1:
+            redis.expire(key, window)
+        return current <= limit
+    except Exception as e:
+        logger.warning(f"Redis rate_limit failed: {e}")
+        return True
+
+
+def redis_set_task(task_id: str, data: dict, ttl: int = 3600) -> bool:
+    """Store task status in Redis Hash."""
+    if not redis:
+        return False
+    try:
+        key = f"task:{task_id}"
+        for k, v in data.items():
+            redis.hset(key, k, str(v))
+        redis.expire(key, ttl)
+        return True
+    except Exception as e:
+        logger.warning(f"Redis set_task failed: {e}")
+        return False
+
+
+def redis_get_task(task_id: str) -> dict | None:
+    """Get task status from Redis Hash."""
+    if not redis:
+        return None
+    try:
+        key = f"task:{task_id}"
+        data = redis.hgetall(key)
+        return data if data else None
+    except Exception as e:
+        logger.warning(f"Redis get_task failed: {e}")
+        return None
+
 
 SERVER_VERSION = "0.7.0"
 
@@ -406,6 +595,12 @@ async def get_latest(client: dict = Depends(get_current_client)):
 @app.post("/send")
 async def send_message(message: Message, client: dict = Depends(get_current_client)):
     """Send a message."""
+    agent_id = client["instance_id"]
+
+    # Rate limit check (Redis-backed)
+    if not redis_rate_limit(agent_id):
+        return {"status": "error", "response": "Rate limit exceeded (30 msg/min)"}
+
     # Handle commands
     if message.content.startswith("/"):
         response = await handle_command(message.content, client)
@@ -427,10 +622,13 @@ async def send_message(message: Message, client: dict = Depends(get_current_clie
                     "room": message.room or "lobby",
                 }
                 messages.append(cmd_msg)
+                # Persist command response to Supabase
+                persist_message_to_supabase(cmd_msg, message.room or "lobby")
                 save_state()
         return response
 
     # Create message
+    room_name = message.room or "lobby"
     msg = {
         "msg_id": f"msg-{uuid.uuid4().hex[:8]}",
         "timestamp": int(time.time()),
@@ -442,21 +640,29 @@ async def send_message(message: Message, client: dict = Depends(get_current_clie
         "action": "WRITE",
         "content": message.content,
         "session": message.session or current_session_id,
-        "room": message.room or "lobby",
+        "room": room_name,
     }
 
+    # 1. Persist to in-memory
     messages.append(msg)
-
-    # Add to room
-    room_name = message.room or "lobby"
     if room_name in rooms:
         rooms[room_name]["messages"].append(msg)
 
-    # Broadcast to WebSocket clients
+    # 2. Persist to Supabase (async, non-blocking)
+    persist_message_to_supabase(msg, room_name)
+
+    # 3. Broadcast via Supabase Realtime channel
+    await broadcast_to_room(room_name, msg)
+
+    # 4. Broadcast to local WebSocket clients
     await broadcast_message(msg)
+
     save_state()
 
-    return {"status": "ok", "msg_id": msg["msg_id"]}
+    logger.info(
+        f"WRITE from {client['instance_id']} to #{room_name}: {message.content[:80]}"
+    )
+    return {"status": "ok", "msg_id": msg["msg_id"], "room": room_name}
 
 
 async def handle_command(content: str, client: dict) -> dict:
@@ -471,12 +677,18 @@ async def handle_command(content: str, client: dict) -> dict:
         }
 
     elif cmd == "/online":
-        now = int(time.time())
-        online = [uid for uid, t in online_agents.items() if now - t < 60]
-        if online:
+        # Try Redis first, fallback to in-memory
+        all_online = set()
+        for room_name in rooms:
+            all_online.update(redis_get_online(room_name))
+        if not all_online:
+            # Fallback to in-memory
+            now = int(time.time())
+            all_online = {uid for uid, t in online_agents.items() if now - t < 60}
+        if all_online:
             return {
                 "status": "ok",
-                "response": f"在線用戶 ({len(online)}): {', '.join(online)}",
+                "response": f"在線用戶 ({len(all_online)}): {', '.join(sorted(all_online))}",
             }
         return {"status": "ok", "response": "目前沒有在線用戶"}
 
@@ -520,7 +732,29 @@ async def handle_command(content: str, client: dict) -> dict:
             return {"status": "error", "response": f"Room '{room_name}' not found"}
         rooms[room_name]["members"].add(client["instance_id"])
         save_state()
-        logger.info(f"{client['instance_id']} joined {room_name}")
+        agent_id = client["instance_id"]
+        logger.info(f"{agent_id} joined {room_name}")
+
+        # Track online in Redis
+        redis_add_online(room_name, agent_id)
+
+        # Broadcast join event
+        join_msg = {
+            "msg_id": f"join-{uuid.uuid4().hex[:8]}",
+            "timestamp": int(time.time()),
+            "source": {
+                "instance_id": agent_id,
+                "model_name": client.get("model_name", "unknown"),
+                "role": client.get("role", "ai_agent"),
+            },
+            "action": "ROOM_JOIN",
+            "content": f"[JOIN] {agent_id} 已加入房間 {room_name}",
+            "room": room_name,
+        }
+        persist_message_to_supabase(join_msg, room_name)
+        await broadcast_to_room(room_name, join_msg)
+        await broadcast_message(join_msg)
+
         return {
             "status": "ok",
             "response": f"已加入房間 '{room_name}'（目前 {len(rooms[room_name]['members'])} 人）",
@@ -543,7 +777,28 @@ async def handle_command(content: str, client: dict) -> dict:
                     left_rooms.append(name)
         save_state()
         if left_rooms:
-            logger.info(f"{client['instance_id']} left {', '.join(left_rooms)}")
+            agent_id = client["instance_id"]
+            logger.info(f"{agent_id} left {', '.join(left_rooms)}")
+
+            # Broadcast leave event to each room
+            for r in left_rooms:
+                redis_remove_online(r, agent_id)
+                leave_msg = {
+                    "msg_id": f"leave-{uuid.uuid4().hex[:8]}",
+                    "timestamp": int(time.time()),
+                    "source": {
+                        "instance_id": agent_id,
+                        "model_name": client.get("model_name", "unknown"),
+                        "role": client.get("role", "ai_agent"),
+                    },
+                    "action": "ROOM_LEAVE",
+                    "content": f"[LEAVE] {agent_id} 已離開房間 {r}",
+                    "room": r,
+                }
+                persist_message_to_supabase(leave_msg, r)
+                await broadcast_to_room(r, leave_msg)
+                await broadcast_message(leave_msg)
+
             return {"status": "ok", "response": f"已離開房間：{', '.join(left_rooms)}"}
         return {"status": "ok", "response": "你沒有在任何房間"}
 
@@ -648,6 +903,107 @@ async def heartbeat(client: dict = Depends(get_current_client)):
             logger.info(f"Kicked expired agent: {uid}")
 
     return {"status": "ok", "instance_id": instance_id}
+
+
+# ================== QStash Task Queue ==================
+
+
+class TaskRequest(BaseModel):
+    room: str = "lobby"
+    task_type: str = "process_message"
+    payload: dict = {}
+
+
+@app.post("/queue/task")
+async def queue_task(task: TaskRequest, client: dict = Depends(get_current_client)):
+    """Queue an async task via QStash."""
+    if not qstash:
+        return {"status": "error", "response": "QStash not configured"}
+
+    task_id = f"task-{uuid.uuid4().hex[:8]}"
+    callback_url = os.getenv(
+        "QSTASH_CALLBACK_URL", "http://localhost:8081/qstash/callback"
+    )
+
+    # Store task in Redis
+    redis_set_task(
+        task_id,
+        {
+            "status": "queued",
+            "room": task.room,
+            "task_type": task.task_type,
+            "requested_by": client["instance_id"],
+            "created_at": int(time.time()),
+        },
+    )
+
+    try:
+        result = qstash.message.publish_json(
+            url=callback_url,
+            body={
+                "task_id": task_id,
+                "room": task.room,
+                "task_type": task.task_type,
+                "payload": task.payload,
+                "requested_by": client["instance_id"],
+            },
+            retries=3,
+        )
+        logger.info(f"Queued task {task_id} via QStash: {result}")
+        return {"status": "queued", "task_id": task_id}
+    except Exception as e:
+        logger.error(f"QStash publish failed: {e}")
+        return {"status": "error", "response": str(e)}
+
+
+@app.post("/qstash/callback")
+async def qstash_callback(request: dict):
+    """Receive task results from QStash worker."""
+    task_id = request.get("task_id", "unknown")
+    room = request.get("room", "lobby")
+    task_type = request.get("task_type", "unknown")
+    result = request.get("result", "Task completed")
+
+    logger.info(f"QStash callback: task_id={task_id} room={room} type={task_type}")
+
+    # Update task status in Redis
+    redis_set_task(
+        task_id,
+        {
+            "status": "completed",
+            "room": room,
+            "task_type": task_type,
+            "completed_at": int(time.time()),
+        },
+    )
+
+    # Broadcast result to room
+    result_msg = {
+        "msg_id": f"task-{uuid.uuid4().hex[:8]}",
+        "timestamp": int(time.time()),
+        "source": {
+            "instance_id": "qstash-worker",
+            "model_name": "system",
+            "role": "system",
+        },
+        "action": "TASK_COMPLETE",
+        "content": f"[RESULT] 任務 {task_type} 完成: {result}",
+        "room": room,
+    }
+    persist_message_to_supabase(result_msg, room)
+    await broadcast_to_room(room, result_msg)
+    await broadcast_message(result_msg)
+
+    return {"status": "processed", "task_id": task_id}
+
+
+@app.get("/queue/status/{task_id}")
+async def get_task_status(task_id: str, client: dict = Depends(get_current_client)):
+    """Get task status from Redis."""
+    task = redis_get_task(task_id)
+    if task:
+        return {"task_id": task_id, **task}
+    return {"task_id": task_id, "status": "not_found"}
 
 
 # ================== WebSocket Endpoint ==================
